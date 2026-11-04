@@ -194,14 +194,15 @@ def build_subscription_list_view(chat_id: int):
             else:
                 status_badge = "✅"
 
-            items.append(f"{idx}. <b>{name}</b> {status_badge} | 🔗 <code>{url[:35]}...</code>")
+            items.append(f"{idx}. <b>{name}</b> {status_badge} | 🔗 <code>{url[:30]}...</code>")
+            # Mỗi trang sẽ có một hàng nút quản lý riêng biệt, không bị giới hạn số lượng trang
             keyboard.append([
                 InlineKeyboardButton(f"✏️ Sửa #{idx}", callback_data=f"edit_name_{rowid}"),
                 InlineKeyboardButton(f"🔗 Link #{idx}", callback_data=f"edit_url_{rowid}"),
                 InlineKeyboardButton(f"🗑️ Xóa #{idx}", callback_data=f"del_sub_{rowid}")
             ])
 
-        warning_box = "\n\n🚨 <i>Lưu ý: Trang dùng link Facebook trực tiếp sẽ bị chặn, hãy bấm nút Link tương ứng để đổi sang FetchRSS!</i>" if has_fb_warning else ""
+        warning_box = "\n\n🚨 <i>Lưu ý: Trang dùng link Facebook trực tiếp sẽ bị chặn, hãy bấm nút Link để đổi sang FetchRSS!</i>" if has_fb_warning else ""
         text = f"📋 <b>DANH SÁCH TRANG ({len(rows)} trang đang theo dõi)</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n" + "\n".join(items) + warning_box
 
     keyboard.append([InlineKeyboardButton("➕ Thêm trang mới (Hỗ trợ nhiều dòng)", callback_data="add_sub_prompt")])
@@ -401,7 +402,6 @@ async def handle_user_text_input(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text(f"✅ Đã cập nhật Link mới!\n\n{text}", reply_markup=kb, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
     elif action == "add_sub":
-        # Xử lý thông minh tách dòng bằng Regex để chống lỗi ngắt dòng của Telegram Web/App
         lines = re.split(r'[\r\n]+', text_input)
         context.user_data.clear()
         wait_msg = await update.message.reply_text("⏳ Đang xử lý thêm trang...", parse_mode=ParseMode.HTML)
@@ -414,7 +414,6 @@ async def handle_user_text_input(update: Update, context: ContextTypes.DEFAULT_T
             line = line.strip()
             if not line:
                 continue
-            # Tách phần tử cuối cùng làm URL, phần còn lại làm tên trang
             parts = line.split()
             if len(parts) >= 2 and parts[-1].startswith("http"):
                 feed_url = parts[-1].strip()
@@ -527,5 +526,5 @@ if __name__ == '__main__':
 
     app.job_queue.run_repeating(check_feeds_job, interval=CHECK_INTERVAL, first=5)
 
-    print("🚀 Bot HUIT PRO v1.0 (Fixed Multi-Add) đang chạy 24/7... Nhấn Ctrl+C để dừng.")
+    print("🚀 Bot HUIT v1.0 (đang chạy 24/7... Nhấn Ctrl+C để dừng.")
     app.run_polling()
