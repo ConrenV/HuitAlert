@@ -168,7 +168,7 @@ def get_main_menu_keyboard(chat_id: int):
 
 def get_welcome_text():
     return (
-        "🎓 <b>BOT SĂN ĐIỂM RÈN LUYỆN HUIT v1.1</b> 🎓\n"
+        "🎓 <b>BOT SĂN ĐIỂM RÈN LUYỆN HUIT v1.0</b> 🎓\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🤖 <i>Hệ thống tự động canh bài mới và lọc sự kiện ĐRL 24/7.</i>\n\n"
         "👇 <b>Chọn chức năng bên dưới:</b>"
@@ -265,7 +265,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.commit()
             conn.close()
             text, kb = build_subscription_list_view(chat_id)
-            await query.edit_message_text("✅ Đã xóa!\n\n" + text, reply_markup=kb, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+            await query.edit_message_text("✅ Đã xóa thành công!\n\n" + text, reply_markup=kb, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
         elif data.startswith("edit_name_"):
             rowid = int(data.split("_")[2])
@@ -292,12 +292,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["action"] = "add_sub"
             cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Hủy", callback_data="menu_list")]])
             await query.edit_message_text(
-                "➕ <b>THÊM NHIỀU TRANG CÙNG LÚC</b>\n"
+                "➕ <b>THÊM TRANG THEO DÕI</b>\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "Gõ danh sách theo định dạng (mỗi dòng 1 trang):\n"
-                "<code>Tên_Trang1 Link_RSS_1</code>\n"
-                "<code>Tên_Trang2 Link_RSS_2</code>\n\n"
-                "👉 Gửi danh sách vào khung chat:",
+                "Gõ theo định dạng (hỗ trợ nhiều dòng cùng lúc):\n"
+                "<code>Tên_Trang Link_RSS</code>\n\n"
+                "👉 Gửi vào khung chat:",
                 reply_markup=cancel_kb,
                 parse_mode=ParseMode.HTML
             )
@@ -404,7 +403,7 @@ async def handle_user_text_input(update: Update, context: ContextTypes.DEFAULT_T
     elif action == "add_sub":
         lines = text_input.split("\n")
         context.user_data.clear()
-        wait_msg = await update.message.reply_text("⏳ Đang xử lý thêm danh sách trang...", parse_mode=ParseMode.HTML)
+        wait_msg = await update.message.reply_text("⏳ Đang xử lý thêm trang...", parse_mode=ParseMode.HTML)
 
         added_count = 0
         conn = sqlite3.connect('huit_bot.db')
@@ -418,22 +417,22 @@ async def handle_user_text_input(update: Update, context: ContextTypes.DEFAULT_T
             if len(parts) >= 2 and parts[-1].startswith("http"):
                 feed_url = parts[-1]
                 page_name = " ".join(parts[:-1])
-                c.execute("INSERT OR IGNORE INTO subscriptions VALUES (?, ?, ?)", (chat_id, feed_url, page_name))
                 try:
+                    c.execute("INSERT INTO subscriptions VALUES (?, ?, ?)", (chat_id, feed_url, page_name))
                     feed = fetch_feed_sync(feed_url)
                     for entry in feed.entries[:5]:
                         post_id = entry.get('id', entry.get('link'))
                         if post_id:
                             c.execute("INSERT OR IGNORE INTO seen_posts VALUES (?, ?, ?, ?)", (f"{chat_id}_{post_id}", page_name, entry.get('title', ''), entry.get('link', '')))
-                except Exception:
-                    pass
-                added_count += 1
+                    added_count += 1
+                except sqlite3.IntegrityError:
+                    pass # Tránh lỗi trùng lặp link RSS đã tồn tại
 
         conn.commit()
         conn.close()
 
         text, kb = build_subscription_list_view(chat_id)
-        await wait_msg.edit_text(f"✅ Đã thêm thành công <b>{added_count}</b> trang!\n\n{text}", reply_markup=kb, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+        await wait_msg.edit_text(f"✅ Đã thêm thành công <b>{added_count}</b> trang mới!\n\n{text}", reply_markup=kb, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
 async def check_feeds_job(context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect('huit_bot.db')
@@ -526,5 +525,5 @@ if __name__ == '__main__':
 
     app.job_queue.run_repeating(check_feeds_job, interval=CHECK_INTERVAL, first=5)
 
-    print("🚀 Bot HUIT PRO v1.1 (Thêm hàng loạt trang) đang chạy 24/7... Nhấn Ctrl+C để dừng.")
+    print("🚀 Bot HUIT PRO v1.0 (Hoàn chỉnh tối ưu) đang chạy 24/7... Nhấn Ctrl+C để dừng.")
     app.run_polling()
