@@ -52,8 +52,9 @@ HEADERS = {
 def init_db():
     conn = sqlite3.connect('huit_bot.db')
     c = conn.cursor()
+    # SỬA TRIỆT ĐỂ: Dùng ID tự tăng để lưu trữ không giới hạn số lượng trang, chống ghi đè trùng lặp
     c.execute('''CREATE TABLE IF NOT EXISTS subscriptions
-                 (chat_id INTEGER, feed_url TEXT, page_name TEXT, PRIMARY KEY (chat_id, feed_url))''')
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, feed_url TEXT, page_name TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS seen_posts
                  (post_id TEXT PRIMARY KEY, page_name TEXT, summary TEXT, post_link TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS user_settings
@@ -177,7 +178,7 @@ def get_welcome_text():
 def build_subscription_list_view(chat_id: int):
     conn = sqlite3.connect('huit_bot.db')
     c = conn.cursor()
-    c.execute("SELECT rowid, page_name, feed_url FROM subscriptions WHERE chat_id=?", (chat_id,))
+    c.execute("SELECT id, page_name, feed_url FROM subscriptions WHERE chat_id=?", (chat_id,))
     rows = c.fetchall()
     conn.close()
 
@@ -187,7 +188,7 @@ def build_subscription_list_view(chat_id: int):
         text = "📭 <b>DANH SÁCH TRỐNG</b>\nBạn chưa theo dõi trang nào. Hãy bấm <b>➕ Thêm trang mới</b>."
     else:
         items = []
-        for idx, (rowid, name, url) in enumerate(rows, 1):
+        for idx, (sub_id, name, url) in enumerate(rows, 1):
             if is_direct_facebook_url(url):
                 has_fb_warning = True
                 status_badge = "⚠️"
@@ -195,10 +196,11 @@ def build_subscription_list_view(chat_id: int):
                 status_badge = "✅"
 
             items.append(f"{idx}. <b>{name}</b> {status_badge} | 🔗 <code>{url[:30]}...</code>")
+            # Sử dụng sub_id từ database làm định danh chính xác cho từng hàng nút bấm quản lý
             keyboard.append([
-                InlineKeyboardButton(f"✏️ Sửa #{idx}", callback_data=f"edit_name_{rowid}"),
-                InlineKeyboardButton(f"🔗 Link #{idx}", callback_data=f"edit_url_{rowid}"),
-                InlineKeyboardButton(f"🗑️ Xóa #{idx}", callback_data=f"del_sub_{rowid}")
+                InlineKeyboardButton(f"✏️ Sửa #{idx}", callback_data=f"edit_name_{sub_id}"),
+                InlineKeyboardButton(f"🔗 Link #{idx}", callback_data=f"edit_url_{sub_id}"),
+                InlineKeyboardButton(f"🗑️ Xóa #{idx}", callback_data=f"del_sub_{sub_id}")
             ])
 
         warning_box = "\n\n🚨 <i>Lưu ý: Trang dùng link Facebook trực tiếp sẽ bị chặn, hãy bấm nút Link để đổi sang FetchRSS!</i>" if has_fb_warning else ""
@@ -258,33 +260,33 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
         elif data.startswith("del_sub_"):
-            rowid = int(data.split("_")[2])
+            sub_id = int(data.split("_")[2])
             conn = sqlite3.connect('huit_bot.db')
             c = conn.cursor()
-            c.execute("DELETE FROM subscriptions WHERE rowid=? AND chat_id=?", (rowid, chat_id))
+            c.execute("DELETE FROM subscriptions WHERE id=? AND chat_id=?", (sub_id, chat_id))
             conn.commit()
             conn.close()
             text, kb = build_subscription_list_view(chat_id)
             await query.edit_message_text("✅ Đã xóa thành công!\n\n" + text, reply_markup=kb, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
         elif data.startswith("edit_name_"):
-            rowid = int(data.split("_")[2])
+            sub_id = int(data.split("_")[2])
             conn = sqlite3.connect('huit_bot.db')
             c = conn.cursor()
-            c.execute("SELECT page_name FROM subscriptions WHERE rowid=? AND chat_id=?", (rowid, chat_id))
+            c.execute("SELECT page_name FROM subscriptions WHERE id=? AND chat_id=?", (sub_id, chat_id))
             row = c.fetchone()
             conn.close()
             if not row:
                 return
             context.user_data["action"] = "rename_sub"
-            context.user_data["target_rowid"] = rowid
+            context.user_data["target_sub_id"] = sub_id
             cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Hủy", callback_data="menu_list")]])
             await query.edit_message_text(f"✏️ Đổi tên cho trang (Hiện tại: <b>{row[0]}</b>):\n\nGõ tên mới vào khung chat:", reply_markup=cancel_kb, parse_mode=ParseMode.HTML)
 
         elif data.startswith("edit_url_"):
-            rowid = int(data.split("_")[2])
+            sub_id = int(data.split("_")[2])
             context.user_data["action"] = "change_url_sub"
-            context.user_data["target_rowid"] = rowid
+            context.user_data["target_sub_id"] = sub_id
             cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Hủy", callback_data="menu_list")]])
             await query.edit_message_text("🔗 Dán Link FetchRSS mới vào khung chat:", reply_markup=cancel_kb, parse_mode=ParseMode.HTML)
 
@@ -294,7 +296,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(
                 "➕ <b>THÊM TRANG THEO DÕI</b>\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "Gõ theo định dạng:\n"
+                "Gõ theo định dạng (hỗ trợ nhiều dòng cùng lúc):\n"
                 "<code>Tên_Trang Link_RSS</code>\n\n"
                 "👉 Gửi vào khung chat:",
                 reply_markup=cancel_kb,
@@ -377,11 +379,11 @@ async def handle_user_text_input(update: Update, context: ContextTypes.DEFAULT_T
     text_input = update.message.text.strip()
 
     if action == "rename_sub":
-        rowid = context.user_data.get("target_rowid")
+        sub_id = context.user_data.get("target_sub_id")
         new_name = text_input[:40]
         conn = sqlite3.connect('huit_bot.db')
         c = conn.cursor()
-        c.execute("UPDATE subscriptions SET page_name=? WHERE rowid=? AND chat_id=?", (new_name, rowid, chat_id))
+        c.execute("UPDATE subscriptions SET page_name=? WHERE id=? AND chat_id=?", (new_name, sub_id, chat_id))
         conn.commit()
         conn.close()
         context.user_data.clear()
@@ -389,11 +391,11 @@ async def handle_user_text_input(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text(f"✅ Đã đổi tên thành: <b>{new_name}</b>\n\n{text}", reply_markup=kb, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
     elif action == "change_url_sub":
-        rowid = context.user_data.get("target_rowid")
+        sub_id = context.user_data.get("target_sub_id")
         new_url = text_input.split()[0]
         conn = sqlite3.connect('huit_bot.db')
         c = conn.cursor()
-        c.execute("UPDATE subscriptions SET feed_url=? WHERE rowid=? AND chat_id=?", (new_url, rowid, chat_id))
+        c.execute("UPDATE subscriptions SET feed_url=? WHERE id=? AND chat_id=?", (new_url, sub_id, chat_id))
         conn.commit()
         conn.close()
         context.user_data.clear()
@@ -418,7 +420,8 @@ async def handle_user_text_input(update: Update, context: ContextTypes.DEFAULT_T
                 feed_url = parts[-1].strip()
                 page_name = " ".join(parts[:-1]).strip()
                 try:
-                    c.execute("INSERT OR REPLACE INTO subscriptions VALUES (?, ?, ?)", (chat_id, feed_url, page_name))
+                    # Sử dụng INSERT trực tiếp để nhận diện mỗi dòng là một bản ghi độc lập hoàn toàn
+                    c.execute("INSERT INTO subscriptions (chat_id, feed_url, page_name) VALUES (?, ?, ?)", (chat_id, feed_url, page_name))
                     feed = fetch_feed_sync(feed_url)
                     for entry in feed.entries[:5]:
                         post_id = entry.get('id', entry.get('link'))
@@ -525,5 +528,5 @@ if __name__ == '__main__':
 
     app.job_queue.run_repeating(check_feeds_job, interval=CHECK_INTERVAL, first=5)
 
-    print("🚀 Bot HUIT PRO v1.0 (Fixed Indentation & List View) đang chạy 24/7... Nhấn Ctrl+C để dừng.")
+    print("🚀 Bot HUIT PRO v1.0 (Fixed Database Uniqueness) đang chạy 24/7... Nhấn Ctrl+C để dừng.")
     app.run_polling()
