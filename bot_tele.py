@@ -177,7 +177,6 @@ def get_welcome_text():
 def build_subscription_list_view(chat_id: int):
     conn = sqlite3.connect('huit_bot.db')
     c = conn.cursor()
-    # Lấy toàn bộ danh sách không giới hạn
     c.execute("SELECT rowid, page_name, feed_url FROM subscriptions WHERE chat_id=?", (chat_id,))
     rows = c.fetchall()
     conn.close()
@@ -188,7 +187,6 @@ def build_subscription_list_view(chat_id: int):
         text = "📭 <b>DANH SÁCH TRỐNG</b>\nBạn chưa theo dõi trang nào. Hãy bấm <b>➕ Thêm trang mới</b>."
     else:
         items = []
-        # Duyệt qua toàn bộ rows từ database để hiển thị đầy đủ 100% không sót 1 trang nào
         for idx, (rowid, name, url) in enumerate(rows, 1):
             if is_direct_facebook_url(url):
                 has_fb_warning = True
@@ -491,7 +489,7 @@ async def check_feeds_job(context: ContextTypes.DEFAULT_TYPE):
                 continue
 
             conn = sqlite3.connect('huit_bot.db')
-                    c = conn.cursor()
+            c = conn.cursor()
             c.execute("INSERT OR REPLACE INTO seen_posts VALUES (?, ?, ?, ?)", (unique_key, page_name, summary_clean, post_link))
             conn.commit()
             conn.close()
@@ -527,5 +525,5 @@ if __name__ == '__main__':
 
     app.job_queue.run_repeating(check_feeds_job, interval=CHECK_INTERVAL, first=5)
 
-    print("🚀 Bot HUIT PRO v1.0 (Fixed Complete List View) đang chạy 24/7... Nhấn Ctrl+C để dừng.")
+    print("🚀 Bot HUIT PRO v1.0 (Fixed Indentation & List View) đang chạy 24/7... Nhấn Ctrl+C để dừng.")
     app.run_polling()
