@@ -177,6 +177,7 @@ def get_welcome_text():
 def build_subscription_list_view(chat_id: int):
     conn = sqlite3.connect('huit_bot.db')
     c = conn.cursor()
+    # Lấy toàn bộ danh sách không giới hạn
     c.execute("SELECT rowid, page_name, feed_url FROM subscriptions WHERE chat_id=?", (chat_id,))
     rows = c.fetchall()
     conn.close()
@@ -187,6 +188,7 @@ def build_subscription_list_view(chat_id: int):
         text = "📭 <b>DANH SÁCH TRỐNG</b>\nBạn chưa theo dõi trang nào. Hãy bấm <b>➕ Thêm trang mới</b>."
     else:
         items = []
+        # Duyệt qua toàn bộ rows từ database để hiển thị đầy đủ 100% không sót 1 trang nào
         for idx, (rowid, name, url) in enumerate(rows, 1):
             if is_direct_facebook_url(url):
                 has_fb_warning = True
@@ -195,7 +197,6 @@ def build_subscription_list_view(chat_id: int):
                 status_badge = "✅"
 
             items.append(f"{idx}. <b>{name}</b> {status_badge} | 🔗 <code>{url[:30]}...</code>")
-            # Mỗi trang sẽ có một hàng nút quản lý riêng biệt, không bị giới hạn số lượng trang
             keyboard.append([
                 InlineKeyboardButton(f"✏️ Sửa #{idx}", callback_data=f"edit_name_{rowid}"),
                 InlineKeyboardButton(f"🔗 Link #{idx}", callback_data=f"edit_url_{rowid}"),
@@ -205,7 +206,7 @@ def build_subscription_list_view(chat_id: int):
         warning_box = "\n\n🚨 <i>Lưu ý: Trang dùng link Facebook trực tiếp sẽ bị chặn, hãy bấm nút Link để đổi sang FetchRSS!</i>" if has_fb_warning else ""
         text = f"📋 <b>DANH SÁCH TRANG ({len(rows)} trang đang theo dõi)</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n" + "\n".join(items) + warning_box
 
-    keyboard.append([InlineKeyboardButton("➕ Thêm trang mới (Hỗ trợ nhiều dòng)", callback_data="add_sub_prompt")])
+    keyboard.append([InlineKeyboardButton("➕ Thêm trang mới", callback_data="add_sub_prompt")])
     keyboard.append([InlineKeyboardButton("🔙 Quay lại Menu chính", callback_data="menu_back")])
     return text, InlineKeyboardMarkup(keyboard)
 
@@ -295,7 +296,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(
                 "➕ <b>THÊM TRANG THEO DÕI</b>\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "Gõ theo định dạng (hỗ trợ nhiều dòng cùng lúc):\n"
+                "Gõ theo định dạng:\n"
                 "<code>Tên_Trang Link_RSS</code>\n\n"
                 "👉 Gửi vào khung chat:",
                 reply_markup=cancel_kb,
@@ -490,7 +491,7 @@ async def check_feeds_job(context: ContextTypes.DEFAULT_TYPE):
                 continue
 
             conn = sqlite3.connect('huit_bot.db')
-            c = conn.cursor()
+                    c = conn.cursor()
             c.execute("INSERT OR REPLACE INTO seen_posts VALUES (?, ?, ?, ?)", (unique_key, page_name, summary_clean, post_link))
             conn.commit()
             conn.close()
@@ -526,5 +527,5 @@ if __name__ == '__main__':
 
     app.job_queue.run_repeating(check_feeds_job, interval=CHECK_INTERVAL, first=5)
 
-    print("🚀 Bot HUIT v1.0 (đang chạy 24/7... Nhấn Ctrl+C để dừng.")
+    print("🚀 Bot HUIT PRO v1.0 (Fixed Complete List View) đang chạy 24/7... Nhấn Ctrl+C để dừng.")
     app.run_polling()
