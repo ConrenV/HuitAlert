@@ -159,7 +159,7 @@ def get_main_menu_keyboard(chat_id: int):
     drl_label = "🟢 Chế độ: Chỉ nhận bài ĐRL" if current_drl == 1 else "⚪ Chế độ: Nhận tất cả bài"
 
     keyboard = [
-        [InlineKeyboardButton("📋 Quản lý trang (Thêm/Sửa/Xóa)", callback_data="menu_list")],
+        [InlineKeyboardButton("📋 Quản lý trang theo dõi", callback_data="menu_list")],
         [InlineKeyboardButton("📌 Tủ ĐRL đã lưu", callback_data="menu_saved")],
         [InlineKeyboardButton(drl_label, callback_data="menu_toggle_drl")],
         [InlineKeyboardButton("📖 Hướng dẫn lấy link FetchRSS", callback_data="menu_help")]
@@ -190,19 +190,22 @@ def build_subscription_list_view(chat_id: int):
         for idx, (rowid, name, url) in enumerate(rows, 1):
             if is_direct_facebook_url(url):
                 has_fb_warning = True
-                status_badge = "⚠️ <i>(Cần đổi sang FetchRSS)</i>"
+                status_badge = "⚠️"
             else:
                 status_badge = "✅"
 
-            items.append(f"{idx}. <b>{name}</b> {status_badge}\n   🔗 <code>{url}</code>")
+            items.append(f"{idx}. <b>{name}</b> {status_badge} | 🔗 <code>{url[:35]}...</code>")
+            # Gom gọn nút bấm thành 1 hàng cho mỗi 2 trang để không bị tràn khung Telegram
+        
+        for idx, (rowid, name, url) in enumerate(rows, 1):
             keyboard.append([
                 InlineKeyboardButton(f"✏️ Sửa #{idx}", callback_data=f"edit_name_{rowid}"),
                 InlineKeyboardButton(f"🔗 Link #{idx}", callback_data=f"edit_url_{rowid}"),
                 InlineKeyboardButton(f"🗑️ Xóa #{idx}", callback_data=f"del_sub_{rowid}")
             ])
 
-        warning_box = "\n\n🚨 <i>Lưu ý: Trang dùng link Facebook trực tiếp sẽ bị chặn. Hãy bấm nút tương ứng để đổi link FetchRSS!</i>" if has_fb_warning else ""
-        text = "📋 <b>DANH SÁCH TRANG THEO DÕI</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n" + "\n\n".join(items) + warning_box
+        warning_box = "\n\n🚨 <i>Lưu ý: Trang dùng link Facebook trực tiếp sẽ bị chặn, hãy bấm nút Link tương ứng để đổi sang FetchRSS!</i>" if has_fb_warning else ""
+        text = f"📋 <b>DANH SÁCH TRANG ({len(rows)} trang đang theo dõi)</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n" + "\n".join(items) + warning_box
 
     keyboard.append([InlineKeyboardButton("➕ Thêm trang mới (Hỗ trợ nhiều dòng)", callback_data="add_sub_prompt")])
     keyboard.append([InlineKeyboardButton("🔙 Quay lại Menu chính", callback_data="menu_back")])
@@ -426,7 +429,7 @@ async def handle_user_text_input(update: Update, context: ContextTypes.DEFAULT_T
                             c.execute("INSERT OR IGNORE INTO seen_posts VALUES (?, ?, ?, ?)", (f"{chat_id}_{post_id}", page_name, entry.get('title', ''), entry.get('link', '')))
                     added_count += 1
                 except sqlite3.IntegrityError:
-                    pass # Tránh lỗi trùng lặp link RSS đã tồn tại
+                    pass
 
         conn.commit()
         conn.close()
@@ -525,5 +528,5 @@ if __name__ == '__main__':
 
     app.job_queue.run_repeating(check_feeds_job, interval=CHECK_INTERVAL, first=5)
 
-    print("🚀 Bot HUIT PRO v1.0 (Hoàn chỉnh tối ưu) đang chạy 24/7... Nhấn Ctrl+C để dừng.")
+    print("🚀 Bot HUIT v1.0 (Hoàn chỉnh tối ưu) đang chạy 24/7... Nhấn Ctrl+C để dừng.")
     app.run_polling()
