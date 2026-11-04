@@ -195,9 +195,6 @@ def build_subscription_list_view(chat_id: int):
                 status_badge = "✅"
 
             items.append(f"{idx}. <b>{name}</b> {status_badge} | 🔗 <code>{url[:35]}...</code>")
-            # Gom gọn nút bấm thành 1 hàng cho mỗi 2 trang để không bị tràn khung Telegram
-        
-        for idx, (rowid, name, url) in enumerate(rows, 1):
             keyboard.append([
                 InlineKeyboardButton(f"✏️ Sửa #{idx}", callback_data=f"edit_name_{rowid}"),
                 InlineKeyboardButton(f"🔗 Link #{idx}", callback_data=f"edit_url_{rowid}"),
@@ -404,7 +401,8 @@ async def handle_user_text_input(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text(f"✅ Đã cập nhật Link mới!\n\n{text}", reply_markup=kb, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
     elif action == "add_sub":
-        lines = text_input.split("\n")
+        # Xử lý thông minh tách dòng bằng Regex để chống lỗi ngắt dòng của Telegram Web/App
+        lines = re.split(r'[\r\n]+', text_input)
         context.user_data.clear()
         wait_msg = await update.message.reply_text("⏳ Đang xử lý thêm trang...", parse_mode=ParseMode.HTML)
 
@@ -416,26 +414,27 @@ async def handle_user_text_input(update: Update, context: ContextTypes.DEFAULT_T
             line = line.strip()
             if not line:
                 continue
+            # Tách phần tử cuối cùng làm URL, phần còn lại làm tên trang
             parts = line.split()
             if len(parts) >= 2 and parts[-1].startswith("http"):
-                feed_url = parts[-1]
-                page_name = " ".join(parts[:-1])
+                feed_url = parts[-1].strip()
+                page_name = " ".join(parts[:-1]).strip()
                 try:
-                    c.execute("INSERT INTO subscriptions VALUES (?, ?, ?)", (chat_id, feed_url, page_name))
+                    c.execute("INSERT OR REPLACE INTO subscriptions VALUES (?, ?, ?)", (chat_id, feed_url, page_name))
                     feed = fetch_feed_sync(feed_url)
                     for entry in feed.entries[:5]:
                         post_id = entry.get('id', entry.get('link'))
                         if post_id:
                             c.execute("INSERT OR IGNORE INTO seen_posts VALUES (?, ?, ?, ?)", (f"{chat_id}_{post_id}", page_name, entry.get('title', ''), entry.get('link', '')))
                     added_count += 1
-                except sqlite3.IntegrityError:
-                    pass
+                except Exception as e:
+                    logging.error(f"Add sub error: {e}")
 
         conn.commit()
         conn.close()
 
         text, kb = build_subscription_list_view(chat_id)
-        await wait_msg.edit_text(f"✅ Đã thêm thành công <b>{added_count}</b> trang mới!\n\n{text}", reply_markup=kb, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+        await wait_msg.edit_text(f"✅ Đã thêm thành công <b>{added_count}</b> trang!\n\n{text}", reply_markup=kb, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
 async def check_feeds_job(context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect('huit_bot.db')
@@ -528,5 +527,5 @@ if __name__ == '__main__':
 
     app.job_queue.run_repeating(check_feeds_job, interval=CHECK_INTERVAL, first=5)
 
-    print("🚀 Bot HUIT v1.0 (Hoàn chỉnh tối ưu) đang chạy 24/7... Nhấn Ctrl+C để dừng.")
+    print("🚀 Bot HUIT PRO v1.0 (Fixed Multi-Add) đang chạy 24/7... Nhấn Ctrl+C để dừng.")
     app.run_polling()
