@@ -81,7 +81,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/plain; charset=utf-8")
         self.end_headers()
-        self.wfile.write("🟢 HUIT DRL Bot v2.5 PRO is running 24/7!".encode("utf-8"))
+        self.wfile.write("🟢 HUIT DRL Bot v1.0 is running 24/7!".encode("utf-8"))
 
     def do_HEAD(self):
         # Quan trọng: UptimeRobot bản miễn phí mặc định gửi HEAD request
@@ -98,7 +98,7 @@ def start_keep_alive_server():
         server = HTTPServer(('0.0.0.0', PORT), HealthCheckHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        logging.info(f"🌐 Keep-Alive Server cho UptimeRobot đang lắng nghe tại port {PORT}")
+        logging.info(f"🌐 Keep-Alive Server (v1.0) cho UptimeRobot đang lắng nghe tại port {PORT}")
     except Exception as e:
         logging.error(f"Không thể khởi động Web Server trên port {PORT}: {e}")
 
@@ -316,6 +316,22 @@ def heuristic_drl_check(text: str, links: list) -> bool:
 
     return False
 
+def generate_ai_response_with_fallback(contents: list):
+    """Tự động thử danh sách model mới nhất (gemini-3.0-flash -> gemini-2.0-flash) để chống lỗi 404."""
+    models_to_try = [
+        "gemini-3.0-flash",
+        "gemini-2.0-flash",
+        "gemini-2.5-flash",
+    ]
+    last_err = None
+    for model_name in models_to_try:
+        try:
+            return ai_client.models.generate_content(model=model_name, contents=contents)
+        except Exception as e:
+            last_err = e
+            continue
+    raise last_err
+
 def analyze_post_sync(text: str, links: list, image_urls=None):
     contents = []
     # Gửi tối đa 2 ảnh poster vào Gemini để đọc thông tin trên ảnh và đường link in trên ảnh
@@ -353,7 +369,7 @@ def analyze_post_sync(text: str, links: list, image_urls=None):
     extra_ai_links = []
 
     try:
-        response = ai_client.models.generate_content(model='gemini-2.5-flash', contents=contents)
+        response = generate_ai_response_with_fallback(contents)
         raw_out = (response.text or "").replace("*", "").replace("#", "").strip()
 
         # Tách link do AI đọc được từ chữ trên ảnh poster (nếu có)
@@ -424,7 +440,7 @@ def get_main_menu_keyboard(chat_id: int):
 
 def get_welcome_text():
     return (
-        "🎓 <b>BOT SĂN ĐIỂM RÈN LUYỆN HUIT v2.5 PRO</b> 🎓\n"
+        "🎓 <b>BOT SĂN ĐIỂM RÈN LUYỆN HUIT v1.0</b> 🎓\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🤖 <i>Tự động canh bài mới, giải mã QR, quét Comment & lọc ĐRL 24/7.</i>\n\n"
         "⚡ <b>Lệnh bấm nhanh (chạm vào chữ xanh):</b>\n"
@@ -891,7 +907,7 @@ async def run_feed_check_core(bot, target_chat_id=None):
             )
             all_links = list(dict.fromkeys(extracted_links + comment_and_qr_links))
 
-            # 3. Phân tích bằng Gemini 2.5 Flash (đọc cả chữ trên ảnh Poster) + Bộ lọc Heuristic
+            # 3. Phân tích bằng Gemini AI (tự động fallback model) + Bộ lọc Heuristic
             is_drl, summary_html, ai_img_links = await asyncio.to_thread(
                 analyze_post_sync, clean_text, all_links, updated_images
             )
@@ -1000,5 +1016,5 @@ if __name__ == '__main__':
 
     app.job_queue.run_repeating(check_feeds_job, interval=CHECK_INTERVAL, first=5)
 
-    print("🚀 Bot HUIT PRO v2.5 (QR + Comment + Clickable Commands + UptimeRobot) đang chạy 24/7...")
+    print("🚀 Bot HUIT v1.0 (QR + Comment + Clickable Commands + UptimeRobot) đang chạy 24/7...")
     app.run_polling(drop_pending_updates=True)
