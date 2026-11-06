@@ -57,32 +57,22 @@ CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", 45))
 PORT = int(os.getenv("PORT", 8080))
 DB_PATH = str(BASE_DIR / 'huit_bot.db')
 
-# ==============================================================================
-# CẤU HÌNH CLOUD PERSISTENCE (CHỐNG MẤT DỮ LIỆU KHI RENDER RESTART/REDEPLOY)
-# ==============================================================================
-# Cách 1: Dùng GitHub Gist (Chỉ cần điền GITHUB_TOKEN và GIST_ID trên Render)
+# Cấu hình lưu dữ liệu chạy ngầm (chỉ dành cho Admin trên Render)
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
 GIST_ID = os.getenv("GIST_ID", "").strip()
 GIST_FILENAME = "huit_bot_cloud_db.json"
-
-# Cách 2: Dùng Cloud PostgreSQL như Neon.tech / Supabase (Điền DATABASE_URL)
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-
-# Tùy chọn: ID Telegram của Admin để dùng lệnh /announce (Nếu để trống thì ai dùng bot cũng gửi được)
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "").strip()
 
 # ==============================================================================
-# CẤU HÌNH PHIÊN BẢN & THÔNG BÁO CẬP NHẬT TỰ ĐỘNG (NHƯ HÌNH MẪU)
-# Mỗi lần bạn nâng số APP_VERSION (VD: "1.1" -> "1.2") và sửa VERSION_CHANGELOG,
-# Bot sẽ tự động gửi thông báo cập nhật cho toàn bộ người dùng đúng 1 lần!
+# THÔNG BÁO CẬP NHẬT NGẮN GỌN, THÂN THIỆN CHO NGƯỜI DÙNG (v1.2)
 # ==============================================================================
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
 VERSION_CHANGELOG = [
-    "LƯU TRỮ ĐÁM MÂY (CLOUD BACKUP) — KHÔNG BAO GIỜ MẤT DỮ LIỆU KHI RENDER CẬP NHẬT CODE",
-    "CHẾ ĐỘ THÔNG BÁO TẤT CẢ BÀI VIẾT MỚI KẾT HỢP PHÂN LOẠI ĐIỂM RÈN LUYỆN RIÊNG BIỆT",
-    "QUÉT SÂU 10 BÀI GẦN NHẤT & CHỐNG CACHE RSS — VƯỢT QUA MỌI BÀI GHIM TRÊN FANPAGE",
-    "LỆNH /latest LẤY NGAY BÀI ĐĂNG MỚI NHẤT CỦA TẤT CẢ CÁC TRANG ĐANG THEO DÕI",
-    "TÍNH NĂNG TỰ ĐỘNG THÔNG BÁO KHI BOT CÓ BẢN CẬP NHẬT MỚI (/changelog, /announce)",
+    "Thông báo tất cả bài viết mới của trang (vẫn đánh dấu riêng các bài có Điểm rèn luyện)",
+    "Khắc phục lỗi bỏ sót bài đăng mới trên Fanpage",
+    "Thêm lệnh /latest để xem nhanh bài vừa đăng của các trang",
+    "Lưu danh sách trang ổn định, không bị mất khi bảo trì",
 ]
 
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
@@ -107,7 +97,7 @@ HEADERS = {
 
 
 # ==============================================================================
-# 1. UPTIMEROBOT & RENDER KEEP-ALIVE SERVER (v1.1)
+# 1. UPTIMEROBOT & RENDER KEEP-ALIVE SERVER
 # ==============================================================================
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -135,16 +125,16 @@ def start_keep_alive_server():
 
 
 # ==============================================================================
-# 2. HỆ THỐNG DATABASE HYBRID + ĐỒNG BỘ CLOUD TỰ ĐỘNG (GIST / POSTGRESQL / SQLITE)
+# 2. HỆ THỐNG LƯU DỮ LIỆU CHẠY NGẦM (TỰ ĐỘNG SAO LƯU & KHÔI PHỤC)
 # ==============================================================================
 USE_POSTGRES = False
 if DATABASE_URL:
     try:
         import psycopg2
         USE_POSTGRES = True
-        logging.info("☁️ Đã kích hoạt chế độ lưu trữ Cloud PostgreSQL (DATABASE_URL)!")
+        logging.info("☁️ Đã kết nối PostgreSQL thành công!")
     except ImportError:
-        logging.warning("⚠️ Có DATABASE_URL nhưng chưa cài psycopg2-binary, chuyển về SQLite + Gist Cloud.")
+        logging.warning("⚠️ Chưa cài psycopg2-binary, chuyển về SQLite + Gist.")
 
 _gist_sync_lock = threading.Lock()
 _last_gist_sync_time = 0.0
@@ -155,7 +145,6 @@ def get_sqlite_connection():
     return conn
 
 def db_execute(query: str, params: tuple = (), fetch: str = None, commit: bool = False):
-    """Hàm thực thi SQL tương thích cả SQLite lẫn Cloud PostgreSQL."""
     if USE_POSTGRES:
         pg_query = query.replace("?", "%s")
         if "INSERT OR IGNORE INTO" in pg_query:
@@ -219,10 +208,7 @@ def init_db():
             conn.commit()
 
 def restore_db_from_gist():
-    """Tải dữ liệu từ GitHub Gist về SQLite ngay khi Render vừa khởi động lại."""
     if USE_POSTGRES or not (GITHUB_TOKEN and GIST_ID):
-        if not USE_POSTGRES:
-            logging.info("ℹ️ Chưa cấu hình GITHUB_TOKEN/GIST_ID hoặc DATABASE_URL -> Đang chạy SQLite cục bộ.")
         return
     try:
         headers = {
@@ -231,7 +217,7 @@ def restore_db_from_gist():
         }
         resp = requests.get(f"https://api.github.com/gists/{GIST_ID}", headers=headers, timeout=12)
         if resp.status_code != 200:
-            logging.error(f"⚠️ Không thể đọc Gist Backup (HTTP {resp.status_code}). Kiểm tra lại GITHUB_TOKEN & GIST_ID.")
+            logging.error(f"⚠️ Không thể đọc Gist Backup (HTTP {resp.status_code}).")
             return
 
         files = resp.json().get("files", {})
@@ -246,7 +232,6 @@ def restore_db_from_gist():
             return
         data = json.loads(raw_content)
         if not isinstance(data, dict) or not data:
-            logging.info("☁️ Gist Cloud hiện đang trống, sẽ tự động đẩy dữ liệu mới lên khi có thay đổi.")
             return
 
         with get_sqlite_connection() as conn:
@@ -272,15 +257,11 @@ def restore_db_from_gist():
                 c.execute("INSERT OR REPLACE INTO bot_metadata (meta_key, meta_value) VALUES (?, ?)", tuple(row))
 
             conn.commit()
-        logging.info(
-            f"✅ Đã khôi phục dữ liệu thành công từ GitHub Gist Cloud! "
-            f"({len(data.get('subscriptions', []))} trang theo dõi, {len(data.get('saved_posts', []))} mục đã lưu)"
-        )
+        logging.info(f"✅ Đã khôi phục dữ liệu thành công ({len(data.get('subscriptions', []))} trang).")
     except Exception as e:
-        logging.error(f"Lỗi khôi phục dữ liệu từ Gist: {e}")
+        logging.error(f"Lỗi khôi phục dữ liệu: {e}")
 
 def backup_db_to_gist(force: bool = False):
-    """Đẩy toàn bộ dữ liệu SQLite lên GitHub Gist để bảo toàn vĩnh viễn."""
     global _last_gist_sync_time
     if USE_POSTGRES or not (GITHUB_TOKEN and GIST_ID):
         return
@@ -319,7 +300,7 @@ def backup_db_to_gist(force: bool = False):
                     "Accept": "application/vnd.github.v3+json"
                 }
                 body = {
-                    "description": f"HUIT DRL Bot v{APP_VERSION} Cloud Database Backup",
+                    "description": f"HUIT DRL Bot v{APP_VERSION} Data",
                     "files": {
                         GIST_FILENAME: {
                             "content": json.dumps(payload_data, ensure_ascii=False, indent=2)
@@ -329,10 +310,8 @@ def backup_db_to_gist(force: bool = False):
                 resp = requests.patch(f"https://api.github.com/gists/{GIST_ID}", headers=headers, json=body, timeout=12)
                 if resp.status_code == 200:
                     _last_gist_sync_time = time.time()
-                else:
-                    logging.warning(f"Gist Backup HTTP {resp.status_code}: {resp.text[:120]}")
             except Exception as e:
-                logging.error(f"Gist Sync Error: {e}")
+                logging.error(f"Sync Error: {e}")
 
     threading.Thread(target=_sync_worker, daemon=True).start()
 
@@ -356,7 +335,6 @@ def set_meta_value(key: str, val: str):
         backup_db_to_gist(force=True)
 
 def get_all_known_chat_ids() -> list:
-    """Lấy danh sách tất cả người dùng từng tương tác để gửi thông báo cập nhật."""
     ids = set()
     for table in ["subscriptions", "user_settings", "saved_posts"]:
         rows = db_execute(f"SELECT DISTINCT chat_id FROM {table}", fetch="all") or []
@@ -369,7 +347,7 @@ def get_all_known_chat_ids() -> list:
 
 
 # ==============================================================================
-# 3. TỐI ƯU CRAWL RSS, CHỐNG CACHE, QUÉT COMMENT & GIẢI MÃ QR TRONG ẢNH
+# 3. XỬ LÝ LINK FACEBOOK, QUÉT BÌNH LUẬN & ĐỌC MÃ QR TRONG ẢNH
 # ==============================================================================
 def is_direct_facebook_url(url: str) -> bool:
     u = url.lower()
@@ -562,7 +540,7 @@ def fetch_feed_sync(feed_url: str):
 
 
 # ==============================================================================
-# 4. LOGIC PHÂN TÍCH CẢ BÀI THƯỜNG LẪN BÀI ĐIỂM RÈN LUYỆN
+# 4. TÓM TẮT BÀI ĐĂNG & PHÂN LOẠI ĐIỂM RÈN LUYỆN
 # ==============================================================================
 def heuristic_drl_check(text: str, links: list) -> bool:
     t = text.lower()
@@ -617,30 +595,29 @@ def analyze_post_sync(text: str, links: list, image_urls=None):
             except Exception:
                 pass
 
-    display_text = text if text.strip() else "(Bài đăng đính kèm hình ảnh/video, hãy đọc nội dung trên ảnh nếu có)"
+    display_text = text if text.strip() else "(Bài đăng đính kèm hình ảnh, hãy đọc nội dung trên ảnh nếu có)"
 
     prompt = (
-        "Bạn là trợ lý thông báo tin tức & săn Điểm Rèn Luyện (ĐRL) cho sinh viên trường Đại học Công Thương TP.HCM (HUIT).\n"
+        "Bạn là trợ lý tổng hợp thông báo và Điểm Rèn Luyện (ĐRL) cho sinh viên trường Đại học Công Thương TP.HCM (HUIT).\n"
         f"Nội dung bài đăng:\n\"\"\"{display_text}\"\"\"\n"
-        f"Các đường link thu thập được (từ bài viết, QR & Comment): {links}\n\n"
+        f"Các đường link thu thập được: {links}\n\n"
         "NHIỆM VỤ:\n"
         "1. Dòng đầu tiên BẮT BUỘC chỉ ghi [CO_DRL] hoặc [KHONG_DRL].\n"
-        "   - Ghi [CO_DRL] nếu bài viết hoặc chữ trên ảnh poster nói về: cộng điểm rèn luyện (ĐRL), cộng điểm Mục I-V, "
+        "   - Ghi [CO_DRL] nếu bài viết hoặc ảnh poster nói về: cộng điểm rèn luyện (ĐRL), cộng điểm Mục I-V, "
         "tuyển tình nguyện viên, hiến máu, hội thảo, workshop, talkshow, cuộc thi học thuật, khảo sát sinh viên, "
         "hoặc sự kiện có link/mã QR đăng ký tham gia.\n"
-        "   - Ghi [KHONG_DRL] nếu là thông báo học vụ chung, lịch nghỉ, tin tức, chúc mừng, thông tin CLB hoặc bài viết thường.\n"
+        "   - Ghi [KHONG_DRL] nếu là thông báo học vụ chung, lịch nghỉ, tin tức, chúc mừng hoặc bài viết thường.\n"
         "2. Nếu trên ảnh poster có in đường link rút gọn (như bit.ly/..., forms.gle/...) mà chưa có trong danh sách link, "
         "hãy ghi thêm dòng: [LINK_ANH: https://...] ở dòng thứ 2.\n"
-        "3. Tóm tắt rõ ràng, súc tích cho sinh viên theo mẫu sau (KHÔNG dùng dấu * hay định dạng Markdown):\n"
+        "3. Tóm tắt ngắn gọn, tự nhiên, dễ đọc cho sinh viên theo mẫu sau (KHÔNG dùng dấu * hay định dạng Markdown):\n"
         "   - Nếu là [CO_DRL]:\n"
         "     📌 Hoạt động: (Tên sự kiện/hoạt động)\n"
-        "     ⏰ Thời gian / Địa điểm: (Đọc kỹ trong bài và trên ảnh Poster)\n"
-        "     🎁 Quyền lợi: (Ghi rõ số ĐRL được cộng, thuộc Mục nào hoặc quyền lợi khác)\n"
-        "     ⚠️ Lưu ý: (Yêu cầu chính: điền form, quét QR, vào nhóm Zalo, trang phục...)\n"
-        "   - Nếu là [KHONG_DRL] (Bài đăng thông thường):\n"
-        "     📌 Chủ đề: (Tiêu đề/Nội dung chính của bài viết)\n"
-        "     📝 Tóm tắt: (Tóm tắt ngắn gọn 2-3 ý quan trọng nhất trong bài hoặc trong ảnh)\n"
-        "     ℹ️ Phân loại: Tin tức / Thông báo chung (Không đề cập cộng ĐRL)"
+        "     ⏰ Thời gian / Địa điểm: (Ghi rõ thời gian, địa điểm nếu có)\n"
+        "     🎁 Quyền lợi: (Số ĐRL được cộng hoặc quyền lợi khác)\n"
+        "     ⚠️ Lưu ý: (Điền form, quét QR, vào nhóm Zalo, trang phục...)\n"
+        "   - Nếu là [KHONG_DRL]:\n"
+        "     📌 Nội dung: (Tiêu đề hoặc ý chính của bài viết)\n"
+        "     📝 Tóm tắt: (Tóm tắt ngắn gọn 2-3 ý chính trong bài)"
     )
     contents.append(prompt)
 
@@ -669,29 +646,20 @@ def analyze_post_sync(text: str, links: list, image_urls=None):
     except Exception as e:
         logging.error(f"AI Error: {e}")
         lines = [line.strip() for line in text.split('\n') if line.strip()]
-        title = lines[0][:100] if lines else "Bài đăng mới từ trang theo dõi"
-        short_body = "\n".join(lines[1:4])[:280] if len(lines) > 1 else (text[:280] if text else "Xem chi tiết tại link bài viết gốc bên dưới.")
-        reward_text = "Có khả năng cộng ĐRL / Hoạt động sự kiện" if is_drl_fallback else "Thông báo / Bài đăng mới"
+        title = lines[0][:100] if lines else "Bài đăng mới"
+        short_body = "\n".join(lines[1:4])[:280] if len(lines) > 1 else (text[:280] if text else "Xem chi tiết ở bài viết gốc bên dưới.")
         fallback_summary = (
-            f"📌 Chủ đề: {title}\n"
-            f"📝 Nội dung: {short_body}\n"
-            f"🏷️ Phân loại: {reward_text}"
+            f"📌 Nội dung: {title}\n"
+            f"📝 Tóm tắt: {short_body}"
         )
         return is_drl_fallback, html.escape(fallback_summary), []
 
 
 # ==============================================================================
-# 5. ĐỊNH DẠNG THÔNG BÁO CẬP NHẬT GIỐNG HỆT HÌNH MẪU
+# 5. ĐỊNH DẠNG THÔNG BÁO CẬP NHẬT ĐƠN GIẢN, THÂN THIỆN
 # ==============================================================================
-def build_update_notification_message(items: list = None, custom_text: str = None, version: str = None) -> str:
-    """
-    Tạo nội dung thông báo cập nhật đúng chuẩn hình mẫu:
-    Đã thêm:
-    - MỤC 1
-    - MỤC 2
-
-    👉 Vào /menu để xem và trải nghiệm ngay nhé!
-    """
+def build_update_notification_message(items: list = None, custom_text: str = None, version: str = None, is_adding_page: bool = False) -> str:
+    """Hiển thị thông báo ngắn gọn, tự nhiên như admin nhắn cho người dùng."""
     if custom_text:
         lines = [l.strip() for l in custom_text.strip().split("\n") if l.strip()]
         if len(lines) == 1 and not lines[0].startswith("-"):
@@ -703,30 +671,26 @@ def build_update_notification_message(items: list = None, custom_text: str = Non
                 f"- {html.escape(l.lstrip('-•* ').strip())}" for l in lines
             ]
             body_part = "\n" + "\n".join(formatted_lines)
-        return (
-            f"<b>{header_part}</b>{body_part}\n\n"
-            f"👉 Vào /menu hoặc /list để xem và sử dụng ngay nhé!"
-        )
+
+        footer = "👉 Vào /list để xem danh sách trang nhé!" if is_adding_page else "👉 Vào /menu để xem và sử dụng ngay nhé!"
+        return f"<b>{header_part}</b>{body_part}\n\n{footer}"
 
     changelog_items = items or VERSION_CHANGELOG
-    ver_str = f" (Bản cập nhật v{version})" if version else ""
+    ver_str = f" (v{version})" if version else ""
     bullet_lines = "\n".join([f"- {html.escape(item)}" for item in changelog_items])
     return (
-        f"<b>Đã thêm{ver_str}:</b>\n"
+        f"<b>Đã cập nhật{ver_str}:</b>\n"
         f"{bullet_lines}\n\n"
-        f"👉 Vào /menu để xem và trải nghiệm ngay nhé!"
+        f"👉 Vào /menu để xem và sử dụng ngay nhé!"
     )
 
 async def broadcast_version_update_on_startup(application: Application):
-    """Tự động gửi thông báo cập nhật tới toàn bộ người dùng khi nâng APP_VERSION."""
     last_notified = get_meta_value("last_notified_version")
     if last_notified == APP_VERSION:
         return
 
     chat_ids = get_all_known_chat_ids()
     if not chat_ids:
-        # Lưu lại version để khi người dùng đầu tiên bấm /start thì không bị lỗi,
-        # nhưng nếu chưa có user nào thì chờ lúc có user hoặc ghi nhận sẵn.
         set_meta_value("last_notified_version", APP_VERSION)
         return
 
@@ -749,7 +713,7 @@ async def broadcast_version_update_on_startup(application: Application):
 
 
 # ==============================================================================
-# 6. GIAO DIỆN MENU, NÚT BẤM & LỆNH CLICK TRỰC TIẾP (/menu, /list, /saved...)
+# 6. GIAO DIỆN MENU CHÍNH THÂN THIỆN, TỰ NHIÊN
 # ==============================================================================
 async def safe_edit_message(query, text, reply_markup=None):
     try:
@@ -775,55 +739,47 @@ def get_user_drl_mode(chat_id: int) -> int:
         return 0
     return row[0]
 
-def get_cloud_status_label() -> str:
-    if USE_POSTGRES:
-        return "☁️ Cloud PostgreSQL (An toàn 100%)"
-    if GITHUB_TOKEN and GIST_ID:
-        return "☁️ GitHub Gist Cloud (An toàn 100%)"
-    return "⚠️ Cục bộ (Cần thêm GITHUB_TOKEN & GIST_ID)"
-
 def get_main_menu_keyboard(chat_id: int):
     current_drl = get_user_drl_mode(chat_id)
     drl_label = (
-        "🎯 Chế độ: Chỉ báo bài ĐRL (Bấm để nhận TẤT CẢ)"
+        "🔔 Chế độ: Chỉ nhận bài ĐRL (Bấm để đổi)"
         if current_drl == 1
-        else "📢 Chế độ: Báo TẤT CẢ bài mới + lọc ĐRL (Bấm để đổi)"
+        else "🔔 Chế độ: Nhận tất cả bài mới (Bấm để đổi)"
     )
 
     keyboard = [
-        [InlineKeyboardButton("📋 Quản lý trang theo dõi", callback_data="menu_list")],
-        [InlineKeyboardButton("📌 Tủ ĐRL & Bài viết đã lưu", callback_data="menu_saved")],
+        [InlineKeyboardButton("📋 Danh sách trang đang theo dõi", callback_data="menu_list")],
+        [InlineKeyboardButton("📌 Bài viết & Sự kiện đã lưu", callback_data="menu_saved")],
         [InlineKeyboardButton(drl_label, callback_data="menu_toggle_drl")],
         [
-            InlineKeyboardButton("⚡ Quét bài mới ngay", callback_data="menu_force_check"),
-            InlineKeyboardButton("🆕 Xem bài cuối các trang", callback_data="menu_latest_posts")
+            InlineKeyboardButton("⚡ Kiểm tra bài mới", callback_data="menu_force_check"),
+            InlineKeyboardButton("🆕 Bài vừa đăng", callback_data="menu_latest_posts")
         ],
         [
-            InlineKeyboardButton("♻️ Cập nhật v" + APP_VERSION, callback_data="menu_changelog"),
-            InlineKeyboardButton("📖 Hướng dẫn RSS", callback_data="menu_help")
+            InlineKeyboardButton("♻️ Cập nhật", callback_data="menu_changelog"),
+            InlineKeyboardButton("📖 Hướng dẫn", callback_data="menu_help")
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def get_welcome_text(chat_id: int = None):
-    mode_badge = "📢 <b>NHẬN TẤT CẢ BÀI VIẾT (Có gắn nhãn ĐRL riêng)</b>"
+    mode_text = "Nhận tất cả bài viết mới (có báo riêng bài ĐRL)"
     if chat_id is not None and get_user_drl_mode(chat_id) == 1:
-        mode_badge = "🎯 <b>CHỈ NHẬN BÀI CÓ ĐIỂM RÈN LUYỆN</b>"
+        mode_text = "Chỉ nhận bài viết có Điểm rèn luyện"
 
     return (
-        f"🎓 <b>BOT THEO DÕI & SĂN ĐRL HUIT v{APP_VERSION}</b> 🎓\n"
+        "🎓 <b>BOT SĂN ĐIỂM RÈN LUYỆN HUIT</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🔔 Trạng thái: {mode_badge}\n"
-        f"💾 Dữ liệu: <b>{get_cloud_status_label()}</b>\n\n"
-        "⚡ <b>Lệnh bấm nhanh (chạm vào chữ xanh):</b>\n"
-        "👉 /list — Xem & quản lý trang theo dõi\n"
-        "👉 /add — Thêm nhanh trang RSS mới\n"
-        "👉 /scan — Quét các bài mới chưa đọc ngay lập tức\n"
-        "👉 /latest — Ép gửi lại bài mới nhất của từng trang\n"
-        "👉 /drl — Đổi chế độ: Nhận tất cả bài ↔ Chỉ nhận ĐRL\n"
-        "👉 /saved — Mở tủ sự kiện & bài viết đã lưu\n"
-        "👉 /changelog — Xem thông báo cập nhật mới nhất\n\n"
-        "👇 <b>Hoặc chọn trên bảng điều khiển:</b>"
+        "Chào bạn! Mình sẽ giúp bạn theo dõi bài đăng mới và lọc thông báo Điểm rèn luyện từ các trang của trường.\n\n"
+        f"🔔 <b>Đang bật:</b> {mode_text}\n\n"
+        "<b>Các lệnh dùng nhanh:</b>\n"
+        "👉 /list — Danh sách trang đang theo dõi\n"
+        "👉 /add — Thêm trang mới\n"
+        "👉 /scan — Kiểm tra bài mới ngay\n"
+        "👉 /latest — Xem bài vừa đăng của các trang\n"
+        "👉 /drl — Đổi chế độ nhận thông báo\n"
+        "👉 /saved — Xem lại các bài đã lưu\n\n"
+        "👇 <b>Chọn chức năng bên dưới nhé:</b>"
     )
 
 def build_subscription_list_view(chat_id: int):
@@ -833,42 +789,41 @@ def build_subscription_list_view(chat_id: int):
     has_fb_warning = False
     if not rows:
         text = (
-            "📭 <b>DANH SÁCH TRỐNG</b>\n"
-            "Bạn chưa theo dõi trang nào.\n"
-            "👉 Bấm vào /add hoặc nút <b>➕ Thêm trang mới</b> bên dưới!"
+            "📭 <b>DANH SÁCH TRANG THEO DÕI</b>\n\n"
+            "Bạn chưa thêm trang nào cả.\n"
+            "👉 Bấm vào /add hoặc nút <b>➕ Thêm trang mới</b> bên dưới để bắt đầu nhé!"
         )
     else:
         items = []
         for idx, (sub_id, name, url) in enumerate(rows, 1):
             safe_name = html.escape(name)
-            safe_url = html.escape(url[:32])
             if is_direct_facebook_url(url):
                 has_fb_warning = True
-                status_badge = "⚠️ (Link FB trực tiếp - Cần đổi sang RSS)"
+                status_badge = "⚠️ (Cần đổi sang link RSS)"
             else:
                 status_badge = "✅"
 
-            items.append(f"{idx}. <b>{safe_name}</b> {status_badge}\n   🔗 <code>{safe_url}...</code>")
+            items.append(f"{idx}. <b>{safe_name}</b> {status_badge}")
             keyboard.append([
-                InlineKeyboardButton(f"✏️ Sửa #{idx}", callback_data=f"edit_name_{sub_id}"),
-                InlineKeyboardButton(f"🔗 Link #{idx}", callback_data=f"edit_url_{sub_id}"),
+                InlineKeyboardButton(f"✏️ Đổi tên #{idx}", callback_data=f"edit_name_{sub_id}"),
+                InlineKeyboardButton(f"🔗 Đổi link #{idx}", callback_data=f"edit_url_{sub_id}"),
                 InlineKeyboardButton(f"🗑️ Xóa #{idx}", callback_data=f"del_sub_{sub_id}")
             ])
 
         warning_box = (
-            "\n\n🚨 <i>CẢNH BÁO: Trang có dấu ⚠️ đang dùng link Facebook trực tiếp nên sẽ bị Facebook chặn. "
-            "Hãy tạo link từ FetchRSS.com hoặc RSS.app rồi bấm nút <b>🔗 Link</b> để cập nhật!</i>"
+            "\n\n⚠️ <i>Lưu ý: Trang có dấu ⚠️ đang dán link Facebook trực tiếp nên sẽ không tự báo bài được. "
+            "Bạn vào /help xem cách lấy link RSS rồi bấm <b>🔗 Đổi link</b> nhé!</i>"
         ) if has_fb_warning else ""
         text = (
-            f"📋 <b>DANH SÁCH TRANG ({len(rows)} trang đang theo dõi)</b>\n"
+            f"📋 <b>TRANG ĐANG THEO DÕI ({len(rows)} trang)</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             + "\n".join(items)
             + warning_box
-            + "\n\n👈 Bấm /add để thêm trang | /menu về trang chủ"
+            + "\n\n👈 Bấm /add để thêm trang | /menu về trang chính"
         )
 
     keyboard.append([InlineKeyboardButton("➕ Thêm trang mới", callback_data="add_sub_prompt")])
-    keyboard.append([InlineKeyboardButton("🔙 Quay lại Menu chính", callback_data="menu_back")])
+    keyboard.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu_back")])
     return text, InlineKeyboardMarkup(keyboard)
 
 def build_saved_posts_view(chat_id: int):
@@ -881,9 +836,9 @@ def build_saved_posts_view(chat_id: int):
     keyboard = []
     if not rows:
         text = (
-            "📌 <b>TỦ LƯU TRỮ</b>\n"
-            "Bạn chưa lưu sự kiện hay bài viết nào.\n\n"
-            "👈 Bấm /menu để về bảng điều khiển hoặc /scan để quét bài mới!"
+            "📌 <b>BÀI VIẾT ĐÃ LƯU</b>\n\n"
+            "Bạn chưa lưu bài viết hay sự kiện nào.\n"
+            "Khi có thông báo mới, bạn có thể bấm nút <b>🌟 Lưu bài viết</b> ở dưới tin nhắn để xem lại tại đây nhé!"
         )
     else:
         items = []
@@ -891,45 +846,45 @@ def build_saved_posts_view(chat_id: int):
             safe_page = html.escape(page)
             first_line = html.escape(summary.split("\n")[0]) if summary else "Bài viết đã lưu"
             safe_link = html.escape(link, quote=True)
-            items.append(f"<b>{idx}. [{safe_page}]</b> {first_line}\n🔗 <a href=\"{safe_link}\">Mở bài viết gốc</a>")
-            keyboard.append([InlineKeyboardButton(f"🗑️ Xóa mục #{idx}", callback_data=f"del_saved_{saved_id}")])
+            items.append(f"<b>{idx}. [{safe_page}]</b> {first_line}\n🔗 <a href=\"{safe_link}\">Xem bài gốc</a>")
+            keyboard.append([InlineKeyboardButton(f"🗑️ Bỏ lưu mục #{idx}", callback_data=f"del_saved_{saved_id}")])
         text = (
-            "📌 <b>BÀI VIẾT & SỰ KIỆN ĐÃ LƯU (10 mục gần nhất)</b>\n"
+            "📌 <b>BÀI VIẾT & SỰ KIỆN ĐÃ LƯU</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             + "\n\n".join(items)
-            + "\n\n👈 Bấm /menu để về trang chủ | /list xem danh sách trang"
+            + "\n\n👈 Bấm /menu để về trang chính"
         )
 
-    keyboard.append([InlineKeyboardButton("🔙 Quay lại Menu chính", callback_data="menu_back")])
+    keyboard.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="menu_back")])
     return text, InlineKeyboardMarkup(keyboard)
 
 def get_add_sub_instruction_text():
     return (
-        "➕ <b>THÊM TRANG THEO DÕI</b>\n"
+        "➕ <b>THÊM TRANG MỚI</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Gõ theo định dạng (hỗ trợ gửi nhiều dòng cùng lúc):\n"
+        "Bạn gửi tin nhắn theo cú pháp:\n"
         "<code>Tên_Trang Link_RSS</code>\n\n"
         "Ví dụ:\n<code>Đoàn Trường HUIT https://fetchrss.com/rss/...</code>\n\n"
-        "👉 Gửi vào khung chat (hoặc bấm /menu để hủy):"
+        "<i>(Có thể gửi nhiều dòng để thêm nhiều trang cùng lúc)</i>"
     )
 
 def get_help_text():
     return (
-        "📖 <b>HƯỚNG DẪN LẤY LINK RSS & LƯU DỮ LIỆU CLOUD</b>\n"
+        "📖 <b>HƯỚNG DẪN THÊM TRANG THEO DÕI</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "<b>1. Cách tạo link RSS theo dõi Fanpage:</b>\n"
-        "• Vào <a href='https://fetchrss.com'>fetchrss.com</a> hoặc <a href='https://rss.app'>rss.app</a>, dán link Fanpage Facebook vào để lấy link có đuôi <code>.xml</code> hoặc <code>/rss/...</code> rồi dùng lệnh /add.\n\n"
-        "<b>2. Cách chống mất dữ liệu khi Render cập nhật:</b>\n"
-        "• Trên Render -> mục <b>Environment</b>, chỉ cần thêm <code>GITHUB_TOKEN</code> (có quyền gist) và <code>GIST_ID</code> (hoặc <code>DATABASE_URL</code> của Neon.tech).\n"
-        "• Bot sẽ tự động sao lưu mọi trang theo dõi lên đám mây và tự khôi phục ngay khi khởi động lại!\n\n"
-        "<b>3. Lệnh gửi thông báo cập nhật (như hình mẫu):</b>\n"
-        "• Gõ <code>/announce Nội dung mới...</code> để phát thông báo tới người dùng.\n\n"
-        "👈 Bấm /menu để về lại bảng điều khiển."
+        "Để bot tự động báo bài viết từ Facebook, bạn chỉ cần tạo link RSS theo 3 bước đơn giản sau:\n\n"
+        "1. Vào trang <a href='https://fetchrss.com'>fetchrss.com</a> hoặc <a href='https://rss.app'>rss.app</a> (đăng nhập miễn phí).\n"
+        "2. Copy link Fanpage của Khoa / CLB trên Facebook dán vào để tạo link RSS.\n"
+        "3. Copy đường link kết quả (có đuôi <code>.xml</code> hoặc <code>/rss/...</code>) rồi gõ /add để thêm vào bot là xong!\n\n"
+        "💡 <b>Mẹo nhỏ:</b>\n"
+        "• Bạn có thể dùng lệnh /drl để chuyển đổi giữa việc <b>nhận tất cả bài viết</b> hoặc <b>chỉ nhận bài có Điểm rèn luyện</b>.\n"
+        "• Muốn xem ngay bài mới nhất vừa đăng trên các trang, chỉ cần bấm /latest.\n\n"
+        "👈 Bấm /menu để quay lại trang chính."
     )
 
 
 # ==============================================================================
-# 7. CÁC COMMAND HANDLER CHO PHÉP BẤM TRỰC TIẾP TRONG CHAT
+# 7. CÁC LỆNH ĐIỀU KHIỂN TRONG CHAT (/start, /menu, /list, /scan...)
 # ==============================================================================
 async def start_or_menu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
@@ -962,22 +917,25 @@ async def saved_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def scan_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    wait_msg = await update.message.reply_text("⚡ Đang quét sâu 10 bài gần nhất của từng trang (vượt qua cả bài ghim)...", parse_mode=ParseMode.HTML)
+    wait_msg = await update.message.reply_text("⚡ Đang kiểm tra bài viết mới trên các trang...", parse_mode=ParseMode.HTML)
     sent_count = await run_feed_check_core(context.bot, target_chat_id=chat_id, force_latest=False)
-    await wait_msg.edit_text(
-        f"✅ <b>Đã hoàn tất quét bài mới!</b> (Phát hiện và gửi <b>{sent_count}</b> bài chưa đọc).\n"
-        "💡 <i>Nếu muốn ép bot gửi lại bài mới nhất của các trang (kể cả bài đã đọc rồi), hãy bấm vào</i> /latest.\n\n"
-        "👈 Vào /menu hoặc /list để quản lý tiếp nhé!",
-        parse_mode=ParseMode.HTML
-    )
+    if sent_count > 0:
+        result_text = f"✅ <b>Đã cập nhật xong!</b> Có <b>{sent_count}</b> bài mới được gửi ở trên.\n\n👈 Vào /menu để quay lại nhé!"
+    else:
+        result_text = (
+            "✅ <b>Hiện chưa có thêm bài viết mới nào!</b>\n"
+            "💡 <i>Nếu muốn xem lại bài gần nhất của các trang, bạn bấm vào</i> /latest <i>nhé.</i>\n\n"
+            "👈 Vào /menu để quay lại."
+        )
+    await wait_msg.edit_text(result_text, parse_mode=ParseMode.HTML)
 
 async def latest_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    wait_msg = await update.message.reply_text("🆕 Đang lấy bài đăng mới nhất từ tất cả các trang bạn theo dõi...", parse_mode=ParseMode.HTML)
+    wait_msg = await update.message.reply_text("🆕 Đang lấy bài vừa đăng của các trang...", parse_mode=ParseMode.HTML)
     sent_count = await run_feed_check_core(context.bot, target_chat_id=chat_id, force_latest=True)
     await wait_msg.edit_text(
-        f"✅ <b>Đã gửi {sent_count} bài mới nhất từ các trang của bạn!</b>\n\n"
-        "👈 Vào /menu hoặc /list để quản lý tiếp nhé!",
+        f"✅ <b>Đã gửi {sent_count} bài mới nhất từ các trang bạn theo dõi!</b>\n\n"
+        "👈 Vào /menu để quay lại nhé!",
         parse_mode=ParseMode.HTML
     )
 
@@ -1000,31 +958,27 @@ async def toggle_drl_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         backup_db_to_gist(force=True)
 
     mode_str = (
-        "🎯 <b>CHỈ NHẬN BÀI ĐIỂM RÈN LUYỆN</b>"
+        "🎯 <b>Chỉ nhận bài viết có Điểm rèn luyện</b>"
         if new_val == 1
-        else "📢 <b>NHẬN TẤT CẢ BÀI ĐĂNG MỚI (Có gắn nhãn phân biệt bài ĐRL)</b>"
+        else "📢 <b>Nhận tất cả bài viết mới (vẫn đánh dấu riêng bài ĐRL)</b>"
     )
     kb = get_main_menu_keyboard(chat_id)
     await update.message.reply_text(
-        f"🔄 Đã chuyển sang chế độ: {mode_str}\n\n{get_welcome_text(chat_id)}",
+        f"🔄 Đã đổi sang chế độ: {mode_str}\n\n{get_welcome_text(chat_id)}",
         reply_markup=kb,
         parse_mode=ParseMode.HTML
     )
 
 async def changelog_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Hiển thị thông báo cập nhật y hệt hình mẫu."""
-    back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Quay lại Menu chính", callback_data="menu_back")]])
+    back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="menu_back")]])
     msg = build_update_notification_message(version=APP_VERSION)
     await update.message.reply_text(msg, reply_markup=back_kb, parse_mode=ParseMode.HTML)
 
 async def announce_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Lệnh gửi thông báo cập nhật tùy chỉnh tới tất cả người dùng theo đúng mẫu trong ảnh:
-    Ví dụ: /announce Đã thêm tính năng quét QR siêu tốc
-    """
+    """Lệnh ẩn dành cho Admin để phát thông báo nhanh cho người dùng."""
     chat_id = update.effective_chat.id
     if ADMIN_CHAT_ID and str(chat_id) != ADMIN_CHAT_ID:
-        await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh phát thông báo hệ thống.")
+        await update.message.reply_text("⛔ Lệnh này chỉ dành cho Admin.")
         return
 
     raw_text = update.message.text or ""
@@ -1053,10 +1007,10 @@ async def announce_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logging.warning(f"Lỗi gửi announce tới {cid}: {e}")
 
     if len(target_ids) > 1:
-        await update.message.reply_text(f"✅ Đã phát thông báo cập nhật tới {sent} người dùng!")
+        await update.message.reply_text(f"✅ Đã gửi thông báo tới {sent} người dùng!")
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Quay lại Menu chính", callback_data="menu_back")]])
+    back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="menu_back")]])
     await update.message.reply_text(
         get_help_text(),
         reply_markup=back_kb,
@@ -1066,13 +1020,13 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ==============================================================================
-# 8. XỬ LÝ INLINE BUTTON & TIN NHẮN VĂN BẢN
+# 8. XỬ LÝ NÚT BẤM & TIN NHẮN VĂN BẢN
 # ==============================================================================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
     chat_id = query.message.chat_id
-    back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Quay lại Menu chính", callback_data="menu_back")]])
+    back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="menu_back")]])
 
     try:
         if data == "menu_list":
@@ -1087,7 +1041,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db_execute("DELETE FROM subscriptions WHERE id=? AND chat_id=?", (sub_id, chat_id), commit=True)
             backup_db_to_gist(force=True)
             text, kb = build_subscription_list_view(chat_id)
-            await safe_edit_message(query, "✅ Đã xóa thành công (Đã đồng bộ Cloud)!\n\n" + text, kb)
+            await safe_edit_message(query, "✅ Đã xóa trang khỏi danh sách!\n\n" + text, kb)
 
         elif data.startswith("edit_name_"):
             await query.answer()
@@ -1100,7 +1054,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Hủy", callback_data="menu_list")]])
             await safe_edit_message(
                 query,
-                f"✏️ Đổi tên cho trang (Hiện tại: <b>{html.escape(row[0])}</b>):\n\n👉 Gõ tên mới vào khung chat:",
+                f"✏️ Đổi tên cho trang <b>{html.escape(row[0])}</b>:\n\n👉 Nhập tên mới vào khung chat:",
                 cancel_kb
             )
 
@@ -1110,7 +1064,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["action"] = "change_url_sub"
             context.user_data["target_sub_id"] = sub_id
             cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Hủy", callback_data="menu_list")]])
-            await safe_edit_message(query, "🔗 Dán Link FetchRSS / RSS.app mới vào khung chat:", cancel_kb)
+            await safe_edit_message(query, "🔗 Dán link RSS mới vào khung chat:", cancel_kb)
 
         elif data == "add_sub_prompt":
             await query.answer()
@@ -1125,7 +1079,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_edit_message(query, text, kb)
 
         elif data.startswith("del_saved_"):
-            await query.answer("Đã xóa khỏi tủ!")
+            await query.answer("Đã bỏ lưu!")
             saved_id = int(data.split("_")[2])
             db_execute("DELETE FROM saved_posts WHERE id=? AND chat_id=?", (saved_id, chat_id), commit=True)
             backup_db_to_gist(force=True)
@@ -1149,7 +1103,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             dup = db_execute("SELECT 1 FROM saved_posts WHERE chat_id=? AND post_link=?", (chat_id, post_link), fetch="one")
             if dup:
-                await query.answer("⚠️ Bài viết này đã có trong Tủ của bạn rồi!", show_alert=True)
+                await query.answer("Bài viết này đã có trong mục Đã lưu của bạn rồi!", show_alert=True)
                 return
 
             db_execute(
@@ -1158,7 +1112,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 commit=True
             )
             backup_db_to_gist(force=True)
-            await query.answer("🌟 Đã lưu vào Tủ thành công (Đã sao lưu Cloud)!", show_alert=True)
+            await query.answer("🌟 Đã lưu bài viết thành công!", show_alert=True)
 
         elif data == "menu_toggle_drl":
             current = get_user_drl_mode(chat_id)
@@ -1178,33 +1132,33 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 backup_db_to_gist(force=True)
 
             status_msg = (
-                "🎯 Chỉ nhận thông báo có Điểm Rèn Luyện"
+                "Chỉ nhận bài viết có Điểm rèn luyện"
                 if new_val == 1
-                else "📢 Nhận TẤT CẢ bài đăng mới (vẫn gắn nhãn ĐRL riêng)"
+                else "Nhận tất cả bài viết mới"
             )
-            await query.answer(f"Đã chuyển sang: {status_msg}")
+            await query.answer(f"Đã đổi sang: {status_msg}")
             new_kb = get_main_menu_keyboard(chat_id)
             await safe_edit_message(query, get_welcome_text(chat_id), new_kb)
 
         elif data == "menu_force_check":
-            await query.answer("⚡ Đang quét các bài mới chưa đọc...", show_alert=False)
+            await query.answer("⚡ Đang kiểm tra bài viết mới...", show_alert=False)
             sent_count = await run_feed_check_core(context.bot, target_chat_id=chat_id, force_latest=False)
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=(
-                    f"✅ Đã hoàn tất quét bài mới! (Đã gửi <b>{sent_count}</b> bài mới).\n"
-                    "👉 Nếu muốn xem lại bài mới nhất của từng trang (kể cả đã đọc), bấm /latest.\n"
-                    "👈 Vào /menu để mở lại bảng điều khiển."
-                ),
-                parse_mode=ParseMode.HTML
-            )
+            if sent_count > 0:
+                msg_out = f"✅ Đã kiểm tra xong! Có <b>{sent_count}</b> bài mới vừa gửi ở trên.\n👈 Vào /menu để quay lại nhé."
+            else:
+                msg_out = (
+                    "✅ Hiện chưa có thêm bài mới nào!\n"
+                    "👉 Muốn xem lại bài gần nhất của từng trang, bạn bấm /latest nhé.\n"
+                    "👈 Vào /menu để quay lại."
+                )
+            await context.bot.send_message(chat_id=chat_id, text=msg_out, parse_mode=ParseMode.HTML)
 
         elif data == "menu_latest_posts":
-            await query.answer("🆕 Đang lấy bài mới nhất của các trang...", show_alert=False)
+            await query.answer("🆕 Đang lấy bài vừa đăng của các trang...", show_alert=False)
             sent_count = await run_feed_check_core(context.bot, target_chat_id=chat_id, force_latest=True)
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"✅ Đã gửi <b>{sent_count}</b> bài mới nhất từ các trang bạn theo dõi!\n👈 Vào /menu để mở lại bảng điều khiển.",
+                text=f"✅ Đã gửi <b>{sent_count}</b> bài mới nhất từ các trang của bạn!\n👈 Vào /menu để quay lại nhé.",
                 parse_mode=ParseMode.HTML
             )
 
@@ -1257,7 +1211,7 @@ async def handle_user_text_input(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data.clear()
         text, kb = build_subscription_list_view(chat_id)
         await update.message.reply_text(
-            f"✅ Đã cập nhật Link mới!\n\n{text}",
+            f"✅ Đã cập nhật link mới!\n\n{text}",
             reply_markup=kb,
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True
@@ -1266,7 +1220,7 @@ async def handle_user_text_input(update: Update, context: ContextTypes.DEFAULT_T
     elif action == "add_sub":
         lines = re.split(r'[\r\n]+', text_input)
         context.user_data.clear()
-        wait_msg = await update.message.reply_text("⏳ Đang kiểm tra RSS và thêm trang...", parse_mode=ParseMode.HTML)
+        wait_msg = await update.message.reply_text("⏳ Đang thêm trang...", parse_mode=ParseMode.HTML)
 
         added_pages = []
         for line in lines:
@@ -1284,7 +1238,6 @@ async def handle_user_text_input(update: Update, context: ContextTypes.DEFAULT_T
                         (chat_id, feed_url, page_name),
                         commit=True
                     )
-                    # Đánh dấu các bài cũ từ vị trí số 2 trở đi là đã đọc, chừa lại bài mới nhất (index 0) để gửi ngay
                     if feed and getattr(feed, "entries", None):
                         for entry in feed.entries[1:12]:
                             norm_id = normalize_post_unique_id(entry)
@@ -1301,10 +1254,10 @@ async def handle_user_text_input(update: Update, context: ContextTypes.DEFAULT_T
         backup_db_to_gist(force=True)
         text, kb = build_subscription_list_view(chat_id)
 
-        # Hiển thị thông báo "Đã thêm: ..." giống hệt phong cách trong tấm hình
         if added_pages:
             added_notification = build_update_notification_message(
-                custom_text="\n".join([f"- {p}" for p in added_pages])
+                custom_text="\n".join([f"- {p}" for p in added_pages]),
+                is_adding_page=True
             )
             await wait_msg.edit_text(
                 f"{added_notification}\n\n{text}",
@@ -1315,7 +1268,7 @@ async def handle_user_text_input(update: Update, context: ContextTypes.DEFAULT_T
             await run_feed_check_core(context.bot, target_chat_id=chat_id, force_latest=False)
         else:
             await wait_msg.edit_text(
-                f"⚠️ Không thêm được trang nào. Hãy kiểm tra lại cú pháp: <code>Tên_Trang Link_RSS</code>\n\n{text}",
+                f"⚠️ Chưa thêm được trang. Bạn nhớ gõ đúng cú pháp: <code>Tên_Trang Link_RSS</code> nhé!\n\n{text}",
                 reply_markup=kb,
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True
@@ -1323,7 +1276,7 @@ async def handle_user_text_input(update: Update, context: ContextTypes.DEFAULT_T
 
 
 # ==============================================================================
-# 9. TIẾN TRÌNH QUÉT BÀI ĐỊNH KỲ (QUÉT SÂU 10 BÀI - VƯỢT BÀI GHIM - CLOUD SYNC)
+# 9. TIẾN TRÌNH QUÉT BÀI TỰ ĐỘNG
 # ==============================================================================
 async def run_feed_check_core(bot, target_chat_id=None, force_latest=False) -> int:
     total_sent = 0
@@ -1393,23 +1346,23 @@ async def run_feed_check_core(bot, target_chat_id=None, force_latest=False) -> i
 
                 keyboard = []
                 if post_link and post_link.startswith("http"):
-                    keyboard.append([InlineKeyboardButton("🌐 Mở bài viết gốc", url=post_link)])
+                    keyboard.append([InlineKeyboardButton("🌐 Xem bài viết gốc", url=post_link)])
 
                 for idx, link in enumerate(all_links[:6], 1):
                     if link != post_link and link.startswith("http"):
                         l_lower = link.lower()
                         is_form = any(f in l_lower for f in ["forms.gle", "docs.google.com/forms", "office.com", "bit.ly", "tinyurl", "shorturl", "cutt.ly"])
                         is_zalo = "zalo.me" in l_lower
-                        label = f"📝 ĐIỀN FORM / ĐĂNG KÝ ({idx})" if is_form else (f"💬 NHÓM ZALO ({idx})" if is_zalo else f"🔗 Link / QR ({idx})")
+                        label = f"📝 Link đăng ký / Form ({idx})" if is_form else (f"💬 Nhóm Zalo ({idx})" if is_zalo else f"🔗 Mở link đính kèm ({idx})")
                         keyboard.append([InlineKeyboardButton(label, url=link)])
 
-                keyboard.append([InlineKeyboardButton("🌟 Lưu bài viết / sự kiện này", callback_data="save_this_post")])
+                keyboard.append([InlineKeyboardButton("🌟 Lưu bài viết", callback_data="save_this_post")])
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
-                badge = "🔥 <b>[SĂN ĐIỂM RÈN LUYỆN]</b>" if is_drl else "📢 <b>[BÀI ĐĂNG MỚI]</b>"
+                badge = "🔥 <b>[ĐIỂM RÈN LUYỆN]</b>" if is_drl else "📢 <b>[BÀI VIẾT MỚI]</b>"
                 safe_page_name = html.escape(page_name)
 
-                quick_nav_footer = "\n\n👈 Vào /menu để điều khiển | /drl đổi chế độ lọc | /scan quét tiếp"
+                quick_nav_footer = "\n\n👈 Vào /menu | /drl đổi chế độ | /scan kiểm tra tiếp"
                 message = (
                     f"{badge} từ <b>{safe_page_name}</b>\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -1454,27 +1407,24 @@ async def check_feeds_job(context: ContextTypes.DEFAULT_TYPE):
 
 
 # ==============================================================================
-# 10. ĐĂNG KÝ MENU LỆNH & TỰ ĐỘNG THÔNG BÁO KHI BOT CẬP NHẬT
+# 10. KHỞI CHẠY ỨNG DỤNG & MENU LỆNH ĐƠN GIẢN
 # ==============================================================================
 async def post_init_setup(application: Application):
     commands = [
-        BotCommand("start", f"🎓 Mở bảng điều khiển Bot v{APP_VERSION}"),
-        BotCommand("menu", "🎛️ Mở nhanh Menu điều khiển"),
-        BotCommand("list", "📋 Quản lý danh sách trang đang theo dõi"),
-        BotCommand("add", "➕ Thêm nhanh trang RSS mới"),
-        BotCommand("scan", "⚡ Quét tất cả bài mới chưa đọc ngay lập tức"),
-        BotCommand("latest", "🆕 Lấy ngay bài đăng mới nhất của từng trang"),
-        BotCommand("drl", "🔄 Đổi chế độ: Nhận tất cả bài ↔ Chỉ bài ĐRL"),
-        BotCommand("saved", "📌 Mở tủ sự kiện & bài viết đã lưu"),
-        BotCommand("changelog", "♻️ Xem các tính năng vừa cập nhật"),
-        BotCommand("announce", "📣 Phát thông báo cập nhật mới"),
-        BotCommand("help", "📖 Hướng dẫn lấy link RSS & Cloud Backup"),
+        BotCommand("menu", "🎛️ Mở bảng điều khiển"),
+        BotCommand("list", "📋 Danh sách trang đang theo dõi"),
+        BotCommand("add", "➕ Thêm trang mới"),
+        BotCommand("scan", "⚡ Kiểm tra bài mới ngay"),
+        BotCommand("latest", "🆕 Xem bài vừa đăng của các trang"),
+        BotCommand("drl", "🔔 Đổi chế độ: Tất cả bài ↔ Chỉ bài ĐRL"),
+        BotCommand("saved", "📌 Xem các bài viết đã lưu"),
+        BotCommand("changelog", "♻️ Xem cập nhật mới"),
+        BotCommand("help", "📖 Hướng dẫn sử dụng"),
     ]
     try:
         await application.bot.set_my_commands(commands)
         await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
         logging.info(f"✅ Đã kích hoạt Menu lệnh v{APP_VERSION} thành công!")
-        # Tự động gửi thông báo "Đã thêm: ..." tới người dùng nếu vừa nâng cấp phiên bản
         await broadcast_version_update_on_startup(application)
     except Exception as e:
         logging.error(f"Lỗi cài đặt post_init: {e}")
@@ -1507,5 +1457,5 @@ if __name__ == '__main__':
 
     app.job_queue.run_repeating(check_feeds_job, interval=CHECK_INTERVAL, first=5)
 
-    print(f"🚀 Bot HUIT v{APP_VERSION} (Cloud Backup + Auto Update Changelog + Báo tất cả bài + Lọc ĐRL) đang chạy 24/7...")
+    print(f"🚀 Bot HUIT v{APP_VERSION} đang chạy 24/7...")
     app.run_polling(drop_pending_updates=True)
